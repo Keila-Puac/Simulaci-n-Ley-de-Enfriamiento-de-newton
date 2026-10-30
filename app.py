@@ -10,7 +10,7 @@
 
  Estructura (sin panel lateral; todo se navega desde las pestañas superiores):
    * Inicio ........ resumen, acceso a cada sección y ejemplos rápidos.
-   * Simulación .... datos del problema, gráfica didáctica y consultas.
+   * Simulación .... botón ⚙️ que abre el cuadro flotante de datos; gráfica didáctica y consultas.
    * Constante k ... calcula k a partir de datos básicos (1 medición,
                      2 mediciones o una tabla de medidas con ajuste).
    * Error numérico  comparación de Euler, Heun (RK2) y Runge-Kutta 4.
@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+import streamlit.components.v1 as components
 
 # -----------------------------------------------------------------------------
 # 1. CONFIGURACIÓN GENERAL
@@ -340,18 +341,22 @@ _CSS = """
     .stApp [data-baseweb="tab-highlight"] {background-color: var(--azul) !important;}
     .stApp [data-baseweb="tab-border"] {background-color: var(--borde) !important;}
 
+    iframe[height="0"] {display: none;}
     div[data-testid="stAlert"] {border-radius: 12px;}
     .pie {text-align: center; color: var(--tinta-suave); font-size: 0.82rem; margin-top: 1.5rem;}
 </style>
 """
 
-_img, _tam, _pos = _capas_css(CAPAS_FONDO)
-_himg, _htam, _hpos = _capas_css(CAPAS_HERO)
-st.markdown(
-    _CSS.replace("__FONDO_IMG__", _img).replace("__FONDO_TAM__", _tam).replace("__FONDO_POS__", _pos)
-        .replace("__HERO_IMG__", _himg).replace("__HERO_TAM__", _htam).replace("__HERO_POS__", _hpos),
-    unsafe_allow_html=True,
-)
+@st.cache_data(show_spinner=False)
+def css_final():
+    """Arma el CSS con los stickers una sola vez (se guarda en caché para no recalcularlo)."""
+    _img, _tam, _pos = _capas_css(CAPAS_FONDO)
+    _himg, _htam, _hpos = _capas_css(CAPAS_HERO)
+    return (_CSS.replace("__FONDO_IMG__", _img).replace("__FONDO_TAM__", _tam).replace("__FONDO_POS__", _pos)
+               .replace("__HERO_IMG__", _himg).replace("__HERO_TAM__", _htam).replace("__HERO_POS__", _hpos))
+
+
+st.markdown(css_final(), unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
 # 4. CONSTANTES DE LA APLICACIÓN
@@ -622,6 +627,22 @@ def fichas(c):
     )
 
 
+# Evita que el traductor del navegador (Chrome Translate) modifique el DOM de Streamlit,
+# lo que provoca el error "NotFoundError: removeChild" al cambiar de pestaña.
+_JS_NO_TRADUCIR = """
+    const d = document;
+    d.documentElement.lang = "es";
+    d.documentElement.setAttribute("translate", "no");
+    d.body.setAttribute("translate", "no");
+    if (!d.querySelector('meta[name="google"]')) {
+        const m = d.createElement("meta"); m.name = "google"; m.content = "notranslate"; d.head.appendChild(m);
+    }
+"""
+try:
+    st.html(f"<script>{_JS_NO_TRADUCIR}</script>", unsafe_allow_javascript=True)
+except TypeError:  # Streamlit antiguo sin unsafe_allow_javascript
+    components.html(f"<script>{_JS_NO_TRADUCIR.replace('document', 'window.parent.document', 1)}</script>", height=0)
+
 # -----------------------------------------------------------------------------
 # 7. ENCABEZADO Y NAVEGACIÓN
 # -----------------------------------------------------------------------------
@@ -792,80 +813,95 @@ def figura_principal(c, t_consulta, T_consulta, mostrar):
     return fig
 
 
-def pagina_simulacion():
+def contenido_datos():
+    """Formulario del cuadro flotante: todos los datos del problema en un solo lugar."""
     ss = st.session_state
-    # ---- ① Datos del problema ----------------------------------------------
-    with st.container(border=True):
-        encabezado_seccion("1", "Datos del problema",
-                           "Escribe los datos o carga un ejemplo; todo lo demás se actualiza solo.")
-        ej = st.columns([1.1, 1, 1, 1, 1, 2.2], gap="small")
-        ej[0].markdown("**Ejemplos:**")
-        for col, clave in zip(ej[1:5], EJEMPLOS):
-            col.button(EJEMPLOS[clave][0], key=f"btn_{clave}", help=EJEMPLOS[clave][1],
-                       on_click=aplicar_ejemplo, args=(clave,), width="stretch")
+    st.caption("Escribe tus datos o carga un ejemplo, y pulsa **Aplicar** para ver los resultados.")
 
-        c1, c2, c3 = st.columns(3, gap="large")
-        with c1:
-            st.markdown('<div class="panel-titulo">Objeto y entorno</div>', unsafe_allow_html=True)
-            st.number_input("Temperatura inicial T₀ (°C)", key="T0", min_value=LIM_T[0], max_value=LIM_T[1],
-                            step=1.0, help="Temperatura del objeto en t = 0.")
-            st.number_input("Temperatura ambiente Tₐ (°C)", key="Ta", min_value=LIM_T[0], max_value=1000.0,
-                            step=1.0, help="Temperatura del entorno, que se supone constante.")
-        with c2:
-            st.markdown('<div class="panel-titulo">Tiempo y constante k</div>', unsafe_allow_html=True)
-            st.selectbox("Unidad de tiempo", list(UNIDADES_TIEMPO), key="unidad", on_change=cambiar_unidad,
-                         help="Al cambiarla, k y el tiempo total se convierten automáticamente.")
-            u, seg = UNIDADES_TIEMPO[ss["unidad"]]
-            st.number_input(f"Constante de enfriamiento k (1/{u})", key="k", min_value=LIM_K[0],
-                            max_value=LIM_K[1], step=0.001, format="%.4f",
-                            help="Mayor k → el objeto se enfría (o calienta) más rápido. Debe ser positiva.")
-            st.number_input(f"Tiempo total de simulación ({u})", key="t_total", min_value=LIM_TIEMPO[0],
-                            max_value=LIM_TIEMPO[1], step=1.0, help="Duración de la simulación en la unidad elegida.")
-            st.button("¿No conoces k? Calcúlala →", key="ir_k", on_click=ir_a, args=("Constante k",), width="stretch")
-        with c3:
-            st.markdown('<div class="panel-titulo">Método numérico</div>', unsafe_allow_html=True)
-            st.selectbox("Método de integración", METODOS, key="metodo")
-            st.slider("Número de pasos", min_value=5, max_value=5000, step=5, key="n_pasos",
-                      help="Más pasos → paso h más pequeño → menor error numérico.")
-            st.caption(f"Paso de integración h = {ss['t_total'] / ss['n_pasos']:.4g} {u}")
+    ej = st.columns([1.1, 1, 1, 1, 1], gap="small", vertical_alignment="center")
+    ej[0].markdown("**Ejemplos:**")
+    for col, clave in zip(ej[1:], EJEMPLOS):
+        col.button(EJEMPLOS[clave][0], key=f"btn_{clave}", help=EJEMPLOS[clave][1],
+                   on_click=aplicar_ejemplo, args=(clave,), width="stretch")
+    st.divider()
 
-    c = contexto()
-    if c.T0 == c.Ta:
+    izq, der = st.columns(2, gap="large")
+    with izq:
+        encabezado_seccion("1", "Objeto y entorno")
+        st.number_input("Temperatura inicial T₀ (°C)", key="T0", min_value=LIM_T[0], max_value=LIM_T[1],
+                        step=1.0, help="Temperatura del objeto en t = 0.")
+        st.number_input("Temperatura ambiente Tₐ (°C)", key="Ta", min_value=LIM_T[0], max_value=1000.0,
+                        step=1.0, help="Temperatura del entorno, que se supone constante.")
+    with der:
+        encabezado_seccion("2", "Tiempo y constante k")
+        st.selectbox("Unidad de tiempo", list(UNIDADES_TIEMPO), key="unidad", on_change=cambiar_unidad,
+                     help="Al cambiarla, k y el tiempo total se convierten automáticamente.")
+        u, _ = UNIDADES_TIEMPO[ss["unidad"]]
+        st.number_input(f"Constante de enfriamiento k (1/{u})", key="k", min_value=LIM_K[0],
+                        max_value=LIM_K[1], step=0.001, format="%.4f",
+                        help="Mayor k → el objeto se enfría (o calienta) más rápido. Debe ser positiva.")
+        st.number_input(f"Tiempo total de simulación ({u})", key="t_total", min_value=LIM_TIEMPO[0],
+                        max_value=LIM_TIEMPO[1], step=1.0, help="Duración de la simulación en la unidad elegida.")
+
+    with st.expander("Opciones avanzadas: método numérico"):
+        m1, m2 = st.columns(2, gap="large")
+        m1.selectbox("Método de integración", METODOS, key="metodo")
+        m2.slider("Número de pasos", min_value=5, max_value=5000, step=5, key="n_pasos",
+                  help="Más pasos → paso h más pequeño → menor error numérico.")
+        st.caption(f"Paso de integración h = {ss['t_total'] / ss['n_pasos']:.4g} {u}")
+
+    # Avisos en vivo
+    if ss["T0"] == ss["Ta"]:
         st.warning("T₀ = Tₐ: el objeto ya está en equilibrio y la temperatura no cambia.")
-    if c.metodo == "Euler" and c.k * c.h > 1:
-        st.warning(f"k·h = {c.k * c.h:.2f} > 1: Euler oscila o se vuelve inestable. Aumenta los pasos o usa RK4.")
+    if ss["metodo"] == "Euler" and ss["k"] * ss["t_total"] / ss["n_pasos"] > 1:
+        st.warning("k·h > 1: Euler oscila o se vuelve inestable. Aumenta los pasos o usa RK4.")
 
-    # ---- ② Resultados clave ---------------------------------------------------
-    st.write("")
-    encabezado_seccion("2", f"Resultados clave · modo {c.modo}")
-    t1, t2, t3, t4 = st.columns(4)
-    with t1:
-        tarjeta("Temperatura final", f"{c.T_ana[-1]:.2f} °C", f"En t = {c.t_total:g} {c.u}, con Tₐ = {c.Ta:g} °C", COLOR_NUMERICA)
-    with t2:
-        tarjeta("Constante de tiempo τ = 1/k", f"{c.tau:.3g} {c.u}", "La diferencia con Tₐ cae a 37 %", COLOR_ANALITICA)
-    with t3:
-        tarjeta("Vida media (ln 2 / k)", f"{c.t_half:.3g} {c.u}", "La diferencia con Tₐ se reduce a la mitad", COLOR_ACENTO)
-    with t4:
-        tarjeta("Error numérico máximo", f"{c.err.max():.2e} °C", f"{c.metodo}, h = {c.h:.3g} {c.u}", COLOR_ERROR)
+    st.divider()
+    b1, b2 = st.columns([1, 1.3], gap="small")
+    if b1.button("¿No conoces k? Calcúlala →", key="dlg_ir_k", width="stretch"):
+        ir_a("Constante k")
+        st.rerun()
+    if b2.button("Aplicar y ver resultados", key="dlg_aplicar", type="primary", width="stretch"):
+        st.rerun()
 
-    # ---- ③ Gráfica -------------------------------------------------------------
-    st.write("")
+
+try:  # on_dismiss="rerun": al cerrar con la X la página también se actualiza
+    dialogo_datos = st.dialog("Datos del problema", width="large", on_dismiss="rerun")(contenido_datos)
+except TypeError:  # Streamlit antiguo
+    dialogo_datos = st.dialog("Datos del problema", width="large")(contenido_datos)
+
+
+@st.fragment
+def bloque_grafica():
+    """Gráfica y consultas. Es un fragmento: mover el control de tiempo o las ayudas visuales
+    solo recalcula este bloque (no toda la página), lo que hace la interfaz más fluida."""
+    ss = st.session_state
+    c = contexto()
+
     with st.container(border=True):
-        encabezado_seccion("3", "Gráfica: temperatura en función del tiempo",
-                           "Activa o apaga las ayudas visuales para entender cada concepto de la curva.")
-        o = st.columns(5)
-        mostrar = {
-            "numerica": o[0].checkbox("Solución numérica", value=True),
-            "tau": o[1].checkbox("Constante de tiempo τ", value=True),
-            "mitad": o[2].checkbox("Vida media", value=False),
-            "tangente": o[3].checkbox("Tangente inicial", value=False),
-            "sombreado": o[4].checkbox("Sombrear diferencia", value=True),
-        }
+        h1, h2 = st.columns([3, 1.15], gap="small", vertical_alignment="center")
+        with h1:
+            encabezado_seccion("2", "Gráfica: temperatura en función del tiempo",
+                               "Mueve el control de tiempo para explorar la curva.")
+        with h2:
+            with st.popover("🎛️ Ayudas visuales", width="stretch"):
+                st.caption("Elige qué quieres ver en la gráfica.")
+                mostrar = {
+                    "numerica": st.checkbox("Solución numérica", value=True, key="op_numerica"),
+                    "tau": st.checkbox("Constante de tiempo τ", value=True, key="op_tau"),
+                    "mitad": st.checkbox("Vida media", value=False, key="op_mitad"),
+                    "tangente": st.checkbox("Tangente inicial", value=False, key="op_tangente"),
+                    "sombreado": st.checkbox("Sombrear diferencia", value=True, key="op_sombreado"),
+                }
+
+        # El valor guardado del control debe seguir dentro de [0, t_total] si el tiempo total cambió
+        ss["t_consulta_graf"] = float(np.clip(ss.get("t_consulta_graf", c.t_total / 2), 0.0, c.t_total))
         t_consulta = st.slider(f"Instante a observar: t ({c.u})", min_value=0.0, max_value=float(c.t_total),
-                               value=float(c.t_total) / 2, step=float(c.t_total) / 1000, key="t_consulta_graf")
+                               step=float(c.t_total) / 1000, key="t_consulta_graf")
         T_cons_ana = float(solucion_analitica(t_consulta, c.T0, c.Ta, c.k))
         T_cons_num = float(np.interp(t_consulta, c.t_num, c.T_num))
-        st.plotly_chart(figura_principal(c, t_consulta, T_cons_ana, mostrar), width="stretch", theme=None)
+        st.plotly_chart(figura_principal(c, t_consulta, T_cons_ana, mostrar), width="stretch", theme=None,
+                        config={"displaylogo": False})
 
         with st.expander("¿Cómo leer esta gráfica?"):
             st.markdown(
@@ -877,9 +913,8 @@ def pagina_simulacion():
                 "- **Puntos celestes:** solución numérica; mientras más pasos, más se pegan a la curva exacta."
             )
 
-    # ---- ④ Consultas -----------------------------------------------------------
     st.write("")
-    encabezado_seccion("4", "Consultas sobre la simulación")
+    encabezado_seccion("3", "Consultas sobre la simulación")
     q1, q2 = st.columns(2, gap="medium")
     with q1:
         with st.container(border=True):
@@ -905,14 +940,51 @@ def pagina_simulacion():
                 st.info(f"Se alcanza en **{t_obj:.3f} {c.u}** ({t_obj * c.seg:,.1f} s).", icon="⏱️")
                 st.latex(rf"t = -\frac{{1}}{{{c.k:.4g}}}\ln\!\left(\frac{{{par(T_obj)} - {par(c.Ta)}}}{{{par(c.T0)} - {par(c.Ta)}}}\right) = {t_obj:.3f}\ \mathrm{{{c.u}}}")
 
-    # ---- ⑤ Hitos ---------------------------------------------------------------
+
+def pagina_simulacion():
+    c = contexto()
+
+    # ---- Barra de acciones: un solo botón abre el cuadro flotante de datos ----
+    barra = st.columns([1.3, 3.9, 1.5], gap="small", vertical_alignment="center")
+    with barra[0]:
+        if st.button("⚙️ Datos del problema", key="abrir_datos", type="primary", width="stretch",
+                     help="Abre el cuadro para cambiar temperaturas, k, tiempo y método."):
+            dialogo_datos()
+    with barra[1]:
+        fichas(c)
+    with barra[2]:
+        st.button("Calcular k →", key="ir_k", on_click=ir_a, args=("Constante k",), width="stretch",
+                  help="¿No conoces k? Obtenla a partir de mediciones.")
+
+    if c.T0 == c.Ta:
+        st.warning("T₀ = Tₐ: el objeto ya está en equilibrio y la temperatura no cambia.")
+    if c.metodo == "Euler" and c.k * c.h > 1:
+        st.warning(f"k·h = {c.k * c.h:.2f} > 1: Euler oscila o se vuelve inestable. Aumenta los pasos o usa RK4.")
+
+    # ---- 1. Resultados clave -------------------------------------------------
+    st.write("")
+    encabezado_seccion("1", f"Resultados clave · modo {c.modo}")
+    t1, t2, t3, t4 = st.columns(4)
+    with t1:
+        tarjeta("Temperatura final", f"{c.T_ana[-1]:.2f} °C", f"En t = {c.t_total:g} {c.u}, con Tₐ = {c.Ta:g} °C", COLOR_NUMERICA)
+    with t2:
+        tarjeta("Constante de tiempo τ = 1/k", f"{c.tau:.3g} {c.u}", "La diferencia con Tₐ cae a 37 %", COLOR_ANALITICA)
+    with t3:
+        tarjeta("Vida media (ln 2 / k)", f"{c.t_half:.3g} {c.u}", "La diferencia con Tₐ se reduce a la mitad", COLOR_ACENTO)
+    with t4:
+        tarjeta("Error numérico máximo", f"{c.err.max():.2e} °C", f"{c.metodo}, h = {c.h:.3g} {c.u}", COLOR_ERROR)
+
+    # ---- 2 y 3. Gráfica y consultas (fragmento: se actualiza sin recargar toda la página)
+    st.write("")
+    bloque_grafica()
+
+    # ---- 4. Hitos --------------------------------------------------------------
     st.write("")
     with st.container(border=True):
-        encabezado_seccion("5", "Hitos del enfriamiento",
+        encabezado_seccion("4", "Hitos del enfriamiento",
                            "Cuánto falta para el equilibrio en múltiplos de la constante de tiempo τ.")
-        mult = [("Vida media", np.log(2)), ("1 τ", 1), ("2 τ", 2), ("3 τ", 3), ("5 τ", 5)]
         filas = []
-        for nombre, m in mult:
+        for nombre, m in [("Vida media", np.log(2)), ("1 τ", 1), ("2 τ", 2), ("3 τ", 3), ("5 τ", 5)]:
             t = m * c.tau
             T = float(solucion_analitica(t, c.T0, c.Ta, c.k))
             resta = float(np.exp(-m) * 100)
